@@ -17,36 +17,140 @@ USE_STORAGE_TYPE = "memory"  # Options: "sqlite" | "memory"
 # 1. DATA ACCESS LAYER (MODELS)
 # =====================================================================
 class PatientModel:
-    """Manages volatile in-memory patient data storage and initial data cleaning."""
-    
-    def __init__(self):
-        self._raw_patients: Dict[int, Dict[str, float]] = {
-            101: {"Glucose": 95.0, "BMI": 22.5, "Age": 28.0, "BloodPressure": 115.0},
-            102: {"Glucose": 145.0, "BMI": 0.0, "Age": 54.0, "BloodPressure": 135.0}, 
-            103: {"Glucose": 112.0, "BMI": 29.1, "Age": 42.0, "BloodPressure": 122.0},
-            104: {"Glucose": 180.0, "BMI": 36.4, "Age": 61.0, "BloodPressure": 142.0}
-        }
+    """Manages persistent patient data using SQLite."""
+
+    def __init__(self, db_path: str = "diabetes_patients.db"):
+        import sqlite3
+
+        self.db_path = db_path
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS patients (
+                    patient_id INTEGER PRIMARY KEY,
+                    Glucose REAL NOT NULL,
+                    BMI REAL NOT NULL,
+                    Age REAL NOT NULL,
+                    BloodPressure REAL NOT NULL
+                )
+            """)
+
+            cursor.execute("SELECT COUNT(*) FROM patients")
+            patient_count = cursor.fetchone()[0]
+
+            if patient_count == 0:
+                default_patients = [
+                    (101, 95.0, 22.5, 28.0, 115.0),
+                    (102, 145.0, 0.0, 54.0, 135.0),
+                    (103, 112.0, 29.1, 42.0, 122.0),
+                    (104, 180.0, 36.4, 61.0, 142.0)
+                ]
+
+                cursor.executemany("""
+                    INSERT INTO patients
+                    (patient_id, Glucose, BMI, Age, BloodPressure)
+                    VALUES (?, ?, ?, ?, ?)
+                """, default_patients)
+
+            conn.commit()
+
         self._clean_initial_data()
 
     def _clean_initial_data(self) -> None:
-        valid_bmis = [p["BMI"] for p in self._raw_patients.values() if p["BMI"] > 0]
-        median_bmi = statistics.median(valid_bmis) if valid_bmis else 25.0
-        for metrics in self._raw_patients.values():
-            if metrics["BMI"] <= 0:
-                metrics["BMI"] = round(median_bmi, 1)
+        import sqlite3
+        import statistics
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT BMI FROM patients WHERE BMI > 0")
+            valid_bmis = [row[0] for row in cursor.fetchall()]
+
+            median_bmi = statistics.median(valid_bmis) if valid_bmis else 25.0
+
+            cursor.execute("""
+                UPDATE patients
+                SET BMI = ?
+                WHERE BMI <= 0
+            """, (round(median_bmi, 1),))
+
+            conn.commit()
 
     def get_all_ids(self) -> List[int]:
-        return sorted(self._raw_patients.keys())
+        import sqlite3
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT patient_id
+                FROM patients
+                ORDER BY patient_id
+            """)
+
+            return [row[0] for row in cursor.fetchall()]
 
     def get_patient(self, patient_id: int) -> Optional[Dict[str, float]]:
-        patient = self._raw_patients.get(patient_id)
-        return patient.copy() if patient else None
+        import sqlite3
 
-    def update_patient(self, patient_id: int, updated_metrics: Dict[str, float]) -> bool:
-        if patient_id in self._raw_patients:
-            self._raw_patients[patient_id].update(updated_metrics)
-            return True
-        return False
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT Glucose, BMI, Age, BloodPressure
+                FROM patients
+                WHERE patient_id = ?
+            """, (patient_id,))
+
+            row = cursor.fetchone()
+
+            if row is None:
+                return None
+
+            return {
+                "Glucose": row[0],
+                "BMI": row[1],
+                "Age": row[2],
+                "BloodPressure": row[3]
+            }
+
+    def update_patient(
+        self,
+        patient_id: int,
+        updated_metrics: Dict[str, float]
+    ) -> bool:
+        import sqlite3
+
+        existing_patient = self.get_patient(patient_id)
+
+        if existing_patient is None:
+            return False
+
+        existing_patient.update(updated_metrics)
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                UPDATE patients
+                SET Glucose = ?,
+                    BMI = ?,
+                    Age = ?,
+                    BloodPressure = ?
+                WHERE patient_id = ?
+            """, (
+                existing_patient["Glucose"],
+                existing_patient["BMI"],
+                existing_patient["Age"],
+                existing_patient["BloodPressure"],
+                patient_id
+            ))
+
+            conn.commit()
+
+        return True
 
 
 class SQLitePatientModel:
