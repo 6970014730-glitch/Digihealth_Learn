@@ -320,43 +320,308 @@ class ConsoleController:
         self.service = service
         self.view = view
 
-    def run(self) -> None:
-        while True:
-            choice = self.view.display_main_menu()
-            if choice == "1":
-                self.handle_assessment_workflow()
-            elif choice == "2":
-                print("\nExiting system. Goodbye.")
-                break
-            else:
-                self.view.display_error("Invalid menu selection. Please choose 1 or 2.")
+def run(self) -> None:
+    import tkinter as tk
+    from tkinter import ttk, messagebox
 
-    def handle_assessment_workflow(self) -> None:
-        valid_ids = self.model.get_all_ids()
-        self.view.display_patient_ids(valid_ids)
-        
-        id_input = self.view.prompt_patient_id()
-        if not id_input.isdigit():
-            self.view.display_error("Patient ID must be a numeric integer value.")
+    root = tk.Tk()
+    root.title("Diabetes Risk Scoring System")
+    root.geometry("650x620")
+    root.resizable(False, False)
+
+    metric_entries = {}
+    current_patient_id = tk.StringVar()
+
+    # ==============================================================
+    # EVENT HANDLERS
+    # ==============================================================
+
+    def load_patient() -> None:
+        patient_id_text = current_patient_id.get().strip()
+
+        if not patient_id_text.isdigit():
+            messagebox.showerror(
+                "Invalid Patient ID",
+                "Patient ID must be a numeric integer value."
+            )
             return
-            
-        patient_id = int(id_input)
-        patient_metrics = self.model.get_patient(patient_id)
-        if not patient_metrics:
-            self.view.display_error(f"Patient ID {patient_id} does not exist in the database.")
+
+        patient_id = int(patient_id_text)
+        patient = self.model.get_patient(patient_id)
+
+        if patient is None:
+            messagebox.showerror(
+                "Patient Not Found",
+                f"Patient ID {patient_id} does not exist in the database."
+            )
             return
 
-        self.view.display_profile(patient_id, patient_metrics)
-        
-        if self.view.prompt_modification_choice():
-            updated_metrics = {}
-            for metric, current_val in patient_metrics.items():
-                updated_metrics[metric] = self.view.prompt_metric_update(metric, current_val)
-            self.model.update_patient(patient_id, updated_metrics)
-            patient_metrics = updated_metrics 
+        for metric, value in patient.items():
+            metric_entries[metric].delete(0, tk.END)
+            metric_entries[metric].insert(0, str(value))
 
-        score, category = self.service.evaluate_patient_risk(patient_metrics)
-        self.view.display_diagnostic_report(patient_id, score, category)
+        report_text.config(state="normal")
+        report_text.delete("1.0", tk.END)
+        report_text.insert(
+            tk.END,
+            f"Patient {patient_id} loaded successfully.\n\n"
+            "You may modify the clinical values before calculating risk."
+        )
+        report_text.config(state="disabled")
+
+    def calculate_risk() -> None:
+        patient_id_text = current_patient_id.get().strip()
+
+        if not patient_id_text.isdigit():
+            messagebox.showerror(
+                "Invalid Patient ID",
+                "Please enter a valid numeric Patient ID."
+            )
+            return
+
+        patient_id = int(patient_id_text)
+
+        if self.model.get_patient(patient_id) is None:
+            messagebox.showerror(
+                "Patient Not Found",
+                f"Patient ID {patient_id} does not exist in the database."
+            )
+            return
+
+        updated_metrics = {}
+
+        try:
+            for metric, entry in metric_entries.items():
+                value_text = entry.get().strip()
+
+                if value_text == "":
+                    raise ValueError(f"{metric} cannot be empty.")
+
+                updated_metrics[metric] = float(value_text)
+
+        except ValueError as exc:
+            messagebox.showerror(
+                "Invalid Clinical Value",
+                str(exc)
+            )
+            return
+
+        update_success = self.model.update_patient(
+            patient_id,
+            updated_metrics
+        )
+
+        if not update_success:
+            messagebox.showerror(
+                "Database Error",
+                "Unable to update the patient record."
+            )
+            return
+
+        score, category = self.service.evaluate_patient_risk(
+            updated_metrics
+        )
+
+        report = (
+            "*" * 54 + "\n"
+            + "-" * 54 + "\n"
+            + "              DIAGNOSTIC RISK REPORT\n"
+            + "-" * 54 + "\n"
+            + "*" * 54 + "\n\n"
+            + f" Patient ID:        {patient_id}\n"
+            + f" Cumulative Score:  {score} pts\n"
+            + f" Risk Category:     {category.upper()}\n\n"
+            + "*" * 54 + "\n"
+            + "-" * 54 + "\n"
+            + "     *** CONFIDENTIAL MEDICAL INFORMATION ***\n"
+            + "-" * 54 + "\n"
+            + "*" * 54
+        )
+
+        report_text.config(state="normal")
+        report_text.delete("1.0", tk.END)
+        report_text.insert(tk.END, report)
+        report_text.config(state="disabled")
+
+    def clear_form() -> None:
+        current_patient_id.set("")
+
+        for entry in metric_entries.values():
+            entry.delete(0, tk.END)
+
+        report_text.config(state="normal")
+        report_text.delete("1.0", tk.END)
+        report_text.config(state="disabled")
+
+    # ==============================================================
+    # HEADER
+    # ==============================================================
+
+    header_frame = ttk.Frame(root, padding=15)
+    header_frame.pack(fill="x")
+
+    ttk.Label(
+        header_frame,
+        text="DIABETES RISK SCORING SYSTEM",
+        font=("Arial", 18, "bold")
+    ).pack()
+
+    ttk.Label(
+        header_frame,
+        text="Clinical Risk Assessment",
+        font=("Arial", 10)
+    ).pack(pady=(4, 0))
+
+    # ==============================================================
+    # PATIENT SELECTION
+    # ==============================================================
+
+    patient_frame = ttk.LabelFrame(
+        root,
+        text="Patient Selection",
+        padding=15
+    )
+    patient_frame.pack(fill="x", padx=20, pady=5)
+
+    ttk.Label(
+        patient_frame,
+        text="Patient ID:"
+    ).grid(row=0, column=0, sticky="w", padx=5, pady=5)
+
+    patient_combo = ttk.Combobox(
+        patient_frame,
+        textvariable=current_patient_id,
+        values=self.model.get_all_ids(),
+        width=20
+    )
+    patient_combo.grid(
+        row=0,
+        column=1,
+        padx=5,
+        pady=5
+    )
+
+    ttk.Button(
+        patient_frame,
+        text="Load Patient",
+        command=load_patient
+    ).grid(
+        row=0,
+        column=2,
+        padx=10,
+        pady=5
+    )
+
+    # ==============================================================
+    # CLINICAL INPUTS
+    # ==============================================================
+
+    clinical_frame = ttk.LabelFrame(
+        root,
+        text="Clinical Parameters",
+        padding=15
+    )
+    clinical_frame.pack(fill="x", padx=20, pady=10)
+
+    metrics = [
+        ("Glucose", "Glucose"),
+        ("BMI", "BMI"),
+        ("Age", "Age"),
+        ("Blood Pressure", "BloodPressure")
+    ]
+
+    for row, (label_text, metric_name) in enumerate(metrics):
+        ttk.Label(
+            clinical_frame,
+            text=f"{label_text}:",
+            width=18
+        ).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            padx=5,
+            pady=5
+        )
+
+        entry = ttk.Entry(
+            clinical_frame,
+            width=25
+        )
+        entry.grid(
+            row=row,
+            column=1,
+            padx=5,
+            pady=5
+        )
+
+        metric_entries[metric_name] = entry
+
+    # ==============================================================
+    # ACTION BUTTONS
+    # ==============================================================
+
+    button_frame = ttk.Frame(root)
+    button_frame.pack(pady=5)
+
+    ttk.Button(
+        button_frame,
+        text="Calculate Risk",
+        command=calculate_risk
+    ).grid(
+        row=0,
+        column=0,
+        padx=5
+    )
+
+    ttk.Button(
+        button_frame,
+        text="Clear",
+        command=clear_form
+    ).grid(
+        row=0,
+        column=1,
+        padx=5
+    )
+
+    ttk.Button(
+        button_frame,
+        text="Exit",
+        command=root.destroy
+    ).grid(
+        row=0,
+        column=2,
+        padx=5
+    )
+
+    # ==============================================================
+    # REPORT DISPLAY
+    # ==============================================================
+
+    report_frame = ttk.LabelFrame(
+        root,
+        text="Diagnostic Risk Report",
+        padding=10
+    )
+    report_frame.pack(
+        fill="both",
+        expand=True,
+        padx=20,
+        pady=10
+    )
+
+    report_text = tk.Text(
+        report_frame,
+        height=13,
+        width=68,
+        font=("Courier New", 10),
+        state="disabled"
+    )
+    report_text.pack(
+        fill="both",
+        expand=True
+    )
+
+    root.mainloop()
 
 
 # =====================================================================
